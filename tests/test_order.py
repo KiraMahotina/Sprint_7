@@ -1,10 +1,11 @@
 import pytest
 import requests
 import allure
+from urls import ORDERS_URL
 
 @allure.feature('Создание заказа')
 class TestOrderCreation:
-    BASE_URL = 'https://qa-scooter.praktikum-services.ru/api/v1/orders'
+    BASE_URL = ORDERS_URL
 
     @allure.title('Создание заказа с разными цветами')
     @pytest.mark.parametrize('color', [['BLACK'], ['GREY'], ['BLACK', 'GREY'], []])
@@ -21,13 +22,20 @@ class TestOrderCreation:
             "color": color
         }
 
-        response = requests.post(self.BASE_URL, json=payload)
-        assert response.status_code == 201
-        assert 'track' in response.json()
+        with allure.step("Отправить запрос на создание заказа"):
+            response = requests.post(self.BASE_URL, json=payload)
+            assert response.status_code == 201
+            response_body = response.json()
+            assert "track" in response_body
+            assert isinstance(response_body["track"], int)
 
 @allure.feature('Список заказов')
 class TestOrderList:
     def test_get_order_list(self):
-        response = requests.get('https://qa-scooter.praktikum-services.ru/api/v1/orders')
-        assert response.status_code == 200
-        assert isinstance(response.json()['orders'], list)
+        with allure.step("Получить список всех заказов"):
+            response = requests.get(ORDERS_URL)
+            assert response.status_code == 200
+            response_body = response.json()
+            assert isinstance(response_body['orders'], list)
+            if response_body['orders']:  # Если список не пустой
+                assert all(key in response_body['orders'][0] for key in ['id', 'track'])

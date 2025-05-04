@@ -1,6 +1,8 @@
 import requests
 import random
 import string
+import allure
+from urls import COURIER_URL
 
 def generate_random_string(length):
     letters = string.ascii_lowercase
@@ -17,10 +19,11 @@ def register_new_courier_and_return_login_password():
         "firstName": first_name
     }
 
-    response = requests.post(
-        'https://qa-scooter.praktikum-services.ru/api/v1/courier',
-        data=payload
-    )
+    with allure.step("Зарегистрировать тестового курьера"):
+        response = requests.post(
+            COURIER_URL,
+            data=payload
+        )
 
     if response.status_code == 201:
         return [login, password, first_name]

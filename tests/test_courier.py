@@ -1,9 +1,8 @@
 import pytest
 import requests
 import allure
-from utils.data_generator import generate_random_string, register_new_courier_and_return_login_password
-
-BASE_URL = 'https://qa-scooter.praktikum-services.ru/api/v1/courier'
+from utils.data_generator import generate_random_string
+from urls import COURIER_URL
 
 @allure.feature('Создание курьера')
 class TestCourierCreation:
@@ -20,23 +19,25 @@ class TestCourierCreation:
         }
 
         with allure.step("Создать курьера"):
-            response = requests.post(BASE_URL, data=payload)
+            response = requests.post(COURIER_URL, data=payload)
             assert response.status_code == 201
             assert response.json() == {"ok": True}
 
-        with allure.step("Удалить курьера"):
+        # Удаление вынесено в отдельный шаг пост-условия
+        with allure.step("Пост-условие: удалить тестового курьера"):
             auth_response = requests.post(
-                f'{BASE_URL}/login',
+                f'{COURIER_URL}/login',
                 data={"login": login, "password": password}
             )
-            courier_id = auth_response.json()['id']
-            delete_response = requests.delete(f'{BASE_URL}/{courier_id}')
-            assert delete_response.status_code == 200
+            if auth_response.status_code == 200:
+                courier_id = auth_response.json()['id']
+                delete_response = requests.delete(f'{COURIER_URL}/{courier_id}')
+                assert delete_response.status_code == 200
+                assert delete_response.json() == {"ok": True}
 
     @allure.title('Создание двух одинаковых курьеров')
-    def test_create_duplicate_courier_error(self):
-        courier_data = register_new_courier_and_return_login_password()
-        login, password, first_name = courier_data
+    def test_create_duplicate_courier_error(self, registered_courier):
+        login, password, first_name = registered_courier
 
         payload = {
             "login": login,
@@ -44,16 +45,10 @@ class TestCourierCreation:
             "firstName": first_name
         }
 
-        response = requests.post(BASE_URL, data=payload)
-        assert response.status_code == 409
-        assert response.json()['message'] == 'Этот логин уже используется. Попробуйте другой.'
-
-        auth_response = requests.post(
-            f'{BASE_URL}/login',
-            data={"login": login, "password": password}
-        )
-        courier_id = auth_response.json()['id']
-        requests.delete(f'{BASE_URL}/{courier_id}')
+        with allure.step("Отправить запрос с дублирующими данными"):
+            response = requests.post(COURIER_URL, data=payload)
+            assert response.status_code == 409
+            assert response.json()['message'] == 'Этот логин уже используется. Попробуйте другой.'
 
     @allure.title('Создание курьера с отсутсвующим обязательным полем')
     @pytest.mark.parametrize('missing_field', ['login', 'password'])
@@ -65,62 +60,59 @@ class TestCourierCreation:
         }
         del payload[missing_field]
 
-        response = requests.post(BASE_URL, data=payload)
-        assert response.status_code == 400, f"Тело ответа: {response.text}"
-
+        with allure.step("Отправить запрос на создание курьера"):
+            response = requests.post(COURIER_URL, data=payload)
+            assert response.status_code == 400
+            response_body = response.json()
+            assert "message" in response_body
+            assert response_body["message"] == "Недостаточно данных для создания учетной записи"
 
 @allure.feature('Логин курьера')
 class TestCourierLogin:
     @allure.title('Курьер может авторизоваться')
-    def test_login_success(self):
-        courier_data = register_new_courier_and_return_login_password()
-        login, password, _ = courier_data
+    def test_login_success(self, registered_courier):
+        login, password, _ = registered_courier
 
-        response = requests.post(
-            f'{BASE_URL}/login',
-            data={"login": login, "password": password}
-        )
-        assert response.status_code == 200
-        assert 'id' in response.json()
-
-        courier_id = response.json()['id']
-        requests.delete(f'{BASE_URL}/{courier_id}')
+        with allure.step("Авторизоваться валидными данными"):
+            response = requests.post(
+                f'{COURIER_URL}/login',
+                data={"login": login, "password": password}
+            )
+            assert response.status_code == 200
+            response_body = response.json()
+            assert "id" in response_body
+            assert isinstance(response_body["id"], int)
 
     @allure.title('Авторизация курьера с отсутсвующим обязательным полем')
     @pytest.mark.parametrize('missing_field', ['login', 'password'])
     def test_login_missing_field_error(self, missing_field):
-        base_url = 'https://qa-scooter.praktikum-services.ru/api/v1/courier'
-
         payload = {"login": "", "password": ""}
-        response = requests.post(
-            f'{base_url}/login',
-            json=payload,
-            timeout=(30, 30)
-        )
 
-        print(f"Status Code: {response.status_code}")
-        print(f"Response Body: {response.text}")
+        with allure.step("Отправить запрос на авторизацию без обязательного поля"):
+            response = requests.post(
+                f'{COURIER_URL}/login',
+                json=payload,
+                timeout=(30, 30)
+            )
 
         assert response.status_code == 400
-        assert response.json().get('message') == 'Недостаточно данных для входа'
-        return
+        response_body = response.json()
+        assert "code" in response_body
+        assert "message" in response_body
+        assert response_body["message"] == "Недостаточно данных для входа"
 
+    @allure.title('Авторизация курьера с неправильными логин/пароль')
+    def test_login_invalid_credentials_error(self, registered_courier):
+        login, _, _ = registered_courier
 
-    @allure.title('Авторизация курьера с нправильными логин/пароль')
-    def test_login_invalid_credentials_error(self):
-        courier_data = register_new_courier_and_return_login_password()
-        login, _, _ = courier_data
+        with allure.step("Отправить запрос на авторизацию с неверным паролем"):
+            response = requests.post(
+                f'{COURIER_URL}/login',
+                data={"login": login, "password": "wrong"}
+            )
 
-        response = requests.post(
-            f'{BASE_URL}/login',
-            data={"login": login, "password": "wrong"}
-        )
         assert response.status_code == 404
-        assert response.json()['message'] == 'Учетная запись не найдена'
-
-        auth_response = requests.post(
-            f'{BASE_URL}/login',
-            data={"login": login, "password": courier_data[1]}
-        )
-        courier_id = auth_response.json()['id']
-        requests.delete(f'{BASE_URL}/{courier_id}')
+        response_body = response.json()
+        assert "code" in response_body
+        assert "message" in response_body
+        assert response_body["message"] == "Учетная запись не найдена"
